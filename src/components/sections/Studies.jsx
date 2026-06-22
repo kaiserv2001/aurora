@@ -17,7 +17,7 @@
 //     - window.matchMedia('(prefers-reduced-motion: reduce)') does NOT match
 //   Otherwise the CSS-only vertical column is used (layout-stylist owns that CSS).
 
-import { useRef } from 'react'
+import { useRef, useState, useEffect } from 'react'
 import { motion, useScroll, useTransform, useReducedMotion } from 'framer-motion'
 
 const studies = [
@@ -63,30 +63,34 @@ const studies = [
   },
 ]
 
-// How many extra viewport-heights the section "absorbs" as the user scrolls
-// (more panels = more scroll distance needed — 1.5× per panel beyond first)
-const PIN_SCROLL_MULTIPLIER = studies.length * 0.85
-
 export function Studies() {
   const reduced = useReducedMotion()
   const sectionRef  = useRef(null)
   const trackRef    = useRef(null)
 
-  // ---- Horizontal scroll via Framer Motion useScroll + useTransform ----
-  // We pin the *section* via sticky + a padded height wrapper so normal DOM flow handles
-  // the "scroll distance" without GSAP. The track translates -X as scrollYProgress goes 0→1.
+  // Horizontal travel in PIXELS = how far the track overflows the viewport.
+  // Measured from real layout so the translate never over/under-shoots (the old
+  // percentage approximation flung the track thousands of px off-screen).
+  const [maxShift, setMaxShift] = useState(0)
+  useEffect(() => {
+    const measure = () => {
+      const track  = trackRef.current
+      const mobile = window.matchMedia('(max-width: 900px)').matches
+      if (reduced || mobile || !track) { setMaxShift(0); return }
+      setMaxShift(Math.max(0, track.scrollWidth - window.innerWidth))
+    }
+    measure()
+    window.addEventListener('resize', measure)
+    return () => window.removeEventListener('resize', measure)
+  }, [reduced])
+
+  // Pin the section via sticky + a padded wrapper; the track translates -X (px) as
+  // the wrapper scrolls. Wrapper height = 100vh + maxShift → a natural 1:1 feel.
   const { scrollYProgress } = useScroll({
     target: sectionRef,
     offset: ['start start', 'end end'],
   })
-
-  // translateX range: 0 → -(trackWidth - viewportWidth)
-  // We approximate using panel count. Actual pixel math runs after mount in the effect below.
-  const translateX = useTransform(
-    scrollYProgress,
-    [0, 1],
-    ['0%', `-${(studies.length - 1) * 100 / studies.length * 88}%`]
-  )
+  const x = useTransform(scrollYProgress, [0, 1], [0, -maxShift])
 
   // Section label entrance
   const labelVariants = {
@@ -94,17 +98,13 @@ export function Studies() {
     visible: { opacity: 1, y: 0, transition: { duration: reduced ? 0 : 0.6, ease: [0.16,1,0.3,1] } },
   }
 
-  const pinActive = !reduced && typeof window !== 'undefined' && !window.matchMedia('(max-width:900px)').matches
+  const pinActive = maxShift > 0
 
   return (
     <div
       ref={sectionRef}
       className="studies-pin-wrapper"
-      style={{
-        // Extra height makes room for the horizontal scroll "travel"
-        // Only applied on desktop non-reduced; on mobile CSS resets to auto
-        '--pin-height': `${(PIN_SCROLL_MULTIPLIER + 1) * 100}vh`,
-      }}
+      style={pinActive ? { '--pin-height': `calc(100vh + ${maxShift}px)` } : undefined}
     >
       <section
         className={`studies studies--pin-active`}
@@ -131,7 +131,7 @@ export function Studies() {
           ref={trackRef}
           className="studies__track"
           data-studies-track
-          style={pinActive ? { x: translateX } : undefined}
+          style={pinActive ? { x } : undefined}
         >
           {studies.map(({ index, id, title, year, caption, hue }) => (
             <article
@@ -141,14 +141,22 @@ export function Studies() {
               data-panel-index={index}
               aria-label={title}
             >
-              {/* Generative thumbnail — shader-artist mounts a canvas here */}
+              {/* Generative thumbnail — a still rendered from the aurora engine */}
               <div
                 className="studies__thumb"
                 data-studies-thumb
                 data-study-id={id}
                 style={{ '--study-hue': hue }}
                 aria-hidden="true"
-              />
+              >
+                <img
+                  className="studies__thumb-img"
+                  src={`/studies/${id}.jpeg`}
+                  alt=""
+                  loading="lazy"
+                  decoding="async"
+                />
+              </div>
 
               <div className="studies__panel-body">
                 <div className="studies__panel-meta">
@@ -248,6 +256,20 @@ export function Studies() {
           );
           position: relative;
           overflow: hidden;
+        }
+
+        .studies__thumb-img {
+          position: absolute;
+          inset: 0;
+          width: 100%;
+          height: 100%;
+          object-fit: cover;
+          display: block;
+          transition: transform var(--duration-slow, 640ms) var(--ease-out-expo);
+        }
+
+        .studies__panel:hover .studies__thumb-img {
+          transform: scale(1.04);
         }
 
         .studies__thumb::after {
