@@ -94,7 +94,9 @@ function Scene() {
     // Defensive fallback to 0.5,0.5 if the ref hasn't been populated yet.
     const cur = cursorRef?.current ?? { x: 0.5, y: 0.5 }
     const cx  = typeof cur.x === 'number' ? cur.x : 0.5
-    const cy  = typeof cur.y === 'number' ? cur.y : 0.5
+    // Flip Y: DOM cursor y is top-down (0 = top), but the shader's uv.y is
+    // bottom-up (0 = bottom). Without this the warp reacts on the mirrored side.
+    const cy  = 1.0 - (typeof cur.y === 'number' ? cur.y : 0.5)
 
     // Velocity: frame-to-frame delta (no external dep)
     const raw_dvx = cx - prevMouse.current.x
